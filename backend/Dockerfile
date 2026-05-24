@@ -12,6 +12,7 @@ RUN npm ci
 COPY . .
 
 # Generate Prisma Client
+ENV DATABASE_URL="mongodb+srv://dummy:dummy@dummy.mongodb.net/dummy"
 RUN npx prisma generate
 
 EXPOSE 5001
