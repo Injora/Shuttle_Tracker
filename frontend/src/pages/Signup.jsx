@@ -8,46 +8,68 @@ import {
   User,
   ArrowRight,
   ShieldCheck,
+  Phone,
+  CreditCard
 } from "lucide-react";
 import { GoogleLogin } from "@react-oauth/google";
+import { useAuth } from "../contexts/AuthContext";
+import toast, { Toaster } from "react-hot-toast";
 
-const Signup = ({ setUserType }) => {
+export default function Signup() {
+  const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    role: location.state?.role || "student",
-  });
+  
+  const [role, setRole] = useState(location.state?.role || "student");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mobileNumber, setMobileNumber] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (location.state?.role) {
-      setFormData((prev) => ({ ...prev, role: location.state.role }));
+      setRole(location.state.role);
     }
   }, [location.state]);
 
   const handleSignup = async (e) => {
     e.preventDefault();
+    setIsSubmitting(true);
     try {
       const response = await fetch(
         `${import.meta.env.VITE_API_URL}/api/auth/signup`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(formData),
+          body: JSON.stringify({
+            name,
+            email,
+            password,
+            role,
+            mobileNumber: mobileNumber || undefined,
+            licenseNumber: licenseNumber || undefined,
+          }),
         },
       );
       const data = await response.json();
       if (response.ok) {
-        console.log("Signup success:", data);
-        navigate("/login");
+        toast.success("Account created successfully!");
+        login(data.token, data.user);
+        if (data.user.role === "driver") {
+          navigate("/driver");
+        } else {
+          navigate("/");
+        }
       } else {
-        alert(data.error || "Signup failed");
+        toast.error(data.error || "Signup failed");
       }
     } catch (err) {
-      console.error("Signup error:", err);
-      alert("Something went wrong");
+      toast.error("Network error during registration");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -60,32 +82,31 @@ const Signup = ({ setUserType }) => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             credential: credentialResponse.credential,
-            role: formData.role, // Pass the selected role
+            role,
           }),
         },
       );
       const data = await response.json();
       if (response.ok) {
-        localStorage.setItem("jwt_token", data.token);
-        localStorage.setItem("user_type", data.user.role);
-        if (setUserType) setUserType(data.user.role);
+        toast.success("Account created via Google!");
+        login(data.token, data.user);
         if (data.user.role === "driver") {
-          localStorage.setItem("driver_user", JSON.stringify(data.user));
           navigate("/driver");
         } else {
           navigate("/");
         }
       } else {
-        alert(data.error || "Google Signup failed");
+        toast.error(data.error || "Google registration failed");
       }
     } catch (err) {
-      console.error("Google Signup error:", err);
-      alert("Something went wrong with Google Signup");
+      toast.error("Network error with Google registration");
     }
   };
 
   return (
-    <div className="min-h-[calc(100vh-80px)] w-full flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-[calc(100vh-140px)] w-full flex items-center justify-center p-4 relative overflow-hidden">
+      <Toaster position="top-right" />
+
       {/* Background Decor */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-secondary/20 rounded-full blur-[120px] pointer-events-none" />
@@ -93,118 +114,150 @@ const Signup = ({ setUserType }) => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md"
+        className="w-full max-w-md animate-duration-300"
       >
         <div className="glass-panel p-8 rounded-3xl border border-white/20 dark:border-white/10 shadow-2xl relative z-10">
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center mb-4 shadow-lg shadow-blue-500/30">
-              <UserPlus className="w-8 h-8 text-white" />
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center mb-3 shadow-lg shadow-blue-500/30">
+              <UserPlus className="w-7 h-7 text-white" />
             </div>
-            <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+            <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
               Create Account
             </h2>
-            <p className="text-muted-foreground mt-2">
+            <p className="text-xs text-muted-foreground mt-1.5">
               Join the campus shuttle community
             </p>
           </div>
 
-          <form onSubmit={handleSignup} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium ml-1">Full Name</label>
+          {/* Role selector tab */}
+          <div className="grid grid-cols-2 gap-3 p-1 bg-white/5 border border-white/5 rounded-2xl mb-5">
+            <button
+              type="button"
+              onClick={() => setRole("student")}
+              className={`py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
+                role === "student"
+                  ? "bg-white text-black shadow-lg"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Student Account
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole("driver")}
+              className={`py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
+                role === "driver"
+                  ? "bg-white text-black shadow-lg"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Driver Account
+            </button>
+          </div>
+
+          <form onSubmit={handleSignup} className="space-y-3.5">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-500 uppercase ml-1">Full Name</label>
               <div className="relative group">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                 <input
                   type="text"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm rounded-xl"
                   placeholder="John Doe"
                   required
                 />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium ml-1">Email Address</label>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-500 uppercase ml-1">Email Address</label>
               <div className="relative group">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                 <input
                   type="email"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm rounded-xl"
                   placeholder="name@example.com"
                   required
                 />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium ml-1">Password</label>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-gray-500 uppercase ml-1">Password</label>
               <div className="relative group">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                 <input
                   type="password"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm rounded-xl"
                   placeholder="••••••••"
                   required
                 />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium ml-1">I am a...</label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, role: "student" })}
-                  className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                    formData.role === "student"
-                      ? "bg-primary/10 border-primary text-primary"
-                      : "bg-white/50 dark:bg-gray-800/50 border-border text-muted-foreground"
-                  }`}
-                >
-                  Student
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, role: "driver" })}
-                  className={`py-2 rounded-xl text-sm font-medium border transition-all ${
-                    formData.role === "driver"
-                      ? "bg-secondary/10 border-secondary text-secondary"
-                      : "bg-white/50 dark:bg-gray-800/50 border-border text-muted-foreground"
-                  }`}
-                >
-                  Driver
-                </button>
-              </div>
-            </div>
+            {/* Extra Driver Details fields */}
+            {role === "driver" && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                className="space-y-3.5 border-t border-white/5 pt-3 mt-3"
+              >
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Mobile Number</label>
+                  <div className="relative group">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                    <input
+                      type="text"
+                      value={mobileNumber}
+                      onChange={(e) => setMobileNumber(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm rounded-xl"
+                      placeholder="e.g. +91 9876543210"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Driver License Number</label>
+                  <div className="relative group">
+                    <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                    <input
+                      type="text"
+                      value={licenseNumber}
+                      onChange={(e) => setLicenseNumber(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 bg-white/50 dark:bg-gray-800/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all outline-none text-sm rounded-xl"
+                      placeholder="e.g. DL-1234567890"
+                      required
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
             <button
               type="submit"
-              className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] transition-all flex items-center justify-center gap-2 group"
+              disabled={isSubmitting}
+              className="w-full py-3 mt-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] transition-all flex items-center justify-center gap-2 group cursor-pointer disabled:opacity-50"
             >
-              Sign Up
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              {isSubmitting ? "Creating Account..." : "Sign Up"}
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </form>
 
-          <div className="mt-8">
-            <div className="relative mb-8">
+          <div className="mt-6">
+            <div className="relative mb-6">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-border"></div>
               </div>
               <div className="relative flex justify-center text-xs uppercase">
                 <span className="bg-card px-2 text-muted-foreground">
-                  Or continue with
+                  Or register with Google
                 </span>
               </div>
             </div>
@@ -212,7 +265,7 @@ const Signup = ({ setUserType }) => {
             <div className="flex justify-center">
               <GoogleLogin
                 onSuccess={handleGoogleSuccess}
-                onError={() => alert("Google Signup Failed")}
+                onError={() => toast.error("Google Signup Failed")}
                 useOneTap
                 theme="filled_blue"
                 shape="pill"
@@ -236,6 +289,4 @@ const Signup = ({ setUserType }) => {
       </motion.div>
     </div>
   );
-};
-
-export default Signup;
+}

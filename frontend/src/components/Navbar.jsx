@@ -12,18 +12,17 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
-const Navbar = ({ userType, setUserType }) => {
+export default function Navbar() {
+  const { user, userType, logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    localStorage.removeItem("jwt_token");
-    localStorage.removeItem("user_type");
-    localStorage.removeItem("driver_user");
-    if (setUserType) setUserType(null);
+    logout();
     navigate("/login");
   };
 
@@ -37,109 +36,105 @@ const Navbar = ({ userType, setUserType }) => {
 
   const navLinks = [
     { name: "Home", path: "/", icon: <LayoutDashboard size={18} /> },
-    { name: "Student", path: "/student", icon: <User size={18} /> },
-    { name: "Driver", path: "/driver", icon: <LogIn size={18} /> },
-    { name: "Track", path: "/track-shuttle", icon: <Map size={18} /> },
-    { name: "Login", path: "/login", icon: <LogIn size={18} /> },
   ];
+
+  if (userType === "student") {
+    navLinks.push({ name: "Student Panel", path: "/student", icon: <User size={18} /> });
+    navLinks.push({ name: "Track Shuttle", path: "/track-shuttle", icon: <Map size={18} /> });
+  } else if (userType === "driver") {
+    navLinks.push({ name: "Driver Hub", path: "/driver", icon: <LayoutDashboard size={18} /> });
+  } else {
+    // Guest links
+    navLinks.push({ name: "Track", path: "/track-shuttle", icon: <Map size={18} /> });
+    navLinks.push({ name: "Login", path: "/login", icon: <LogIn size={18} /> });
+  }
 
   return (
     <>
       <motion.nav
         initial={{ y: -100 }}
         animate={{ y: 0 }}
-        transition={{ duration: 0.5 }}
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          scrolled || isOpen
-            ? "glass-panel bg-white/70 dark:bg-gray-900/70 border-b border-gray-200/50 dark:border-gray-800/50 py-3"
-            : "bg-transparent py-5"
+          scrolled
+            ? "bg-white/80 dark:bg-black/80 backdrop-blur-xl border-b border-gray-100 dark:border-white/10 shadow-lg"
+            : "bg-transparent"
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between h-20">
             {/* Logo */}
-            <Link to="/" className="flex items-center gap-2 group">
-              <motion.div
-                whileHover={{ rotate: 15 }}
-                className="p-1 rounded-lg"
+            <div className="flex items-center">
+              <Link
+                to="/"
+                className="flex items-center gap-3 text-gray-900 dark:text-white group"
               >
-                <img
-                  src="/logo.png"
-                  alt="ShuttleTracker Logo"
-                  className="w-10 h-10 object-contain"
-                />
-              </motion.div>
-              <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 group-hover:from-blue-600 group-hover:to-indigo-500 transition-all duration-300">
-                ShuttleTracker
-              </span>
-            </Link>
-
-            {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center gap-1">
-              <div className="flex items-center bg-gray-100/50 dark:bg-gray-800/50 p-1 rounded-full backdrop-blur-sm border border-gray-200 dark:border-gray-700 mr-4">
-                {navLinks.map((link) => {
-                  // If not logged in: show Home, Track, and Driver (will redirect to login)
-                  if (!userType && link.name === "Student") return null;
-
-                  // If driver: only show Driver (Dashboard)
-                  if (userType === "driver" && link.name !== "Driver")
-                    return null;
-
-                  // If student: hide Driver link
-                  if (userType === "student" && link.name === "Driver")
-                    return null;
-
-                  if (link.name === "Login" && userType) return null;
-                  const isActive = location.pathname === link.path;
-                  return (
-                    <Link
-                      key={link.name}
-                      to={link.path}
-                      className={`relative px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 flex items-center gap-2 ${
-                        isActive
-                          ? "text-white"
-                          : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-                      }`}
-                    >
-                      {isActive && (
-                        <motion.div
-                          layoutId="activeTab"
-                          className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full shadow-lg shadow-blue-500/30"
-                          transition={{
-                            type: "spring",
-                            stiffness: 300,
-                            damping: 30,
-                          }}
-                        />
-                      )}
-                      <span className="relative z-10 flex items-center gap-2">
-                        {link.icon}
-                        {link.name === "Driver" && userType === "driver"
-                          ? "Dashboard"
-                          : link.name}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-              {userType && (
-                <button
-                  onClick={handleLogout}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-all"
-                >
-                  <LogOut size={18} />
-                  Logout
-                </button>
-              )}
-              <ThemeToggle />
+                <div className="relative w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-extrabold shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform duration-300">
+                  ST
+                </div>
+                <span className="font-black text-lg tracking-tight group-hover:opacity-80 transition-opacity">
+                  Shuttle Tracker
+                </span>
+              </Link>
             </div>
 
-            {/* Mobile Menu Button */}
-            <div className="md:hidden flex items-center gap-4">
+            {/* Desktop Navigation */}
+            <div className="hidden md:flex items-center gap-1.5">
+              {navLinks.map((link) => {
+                const isActive = location.pathname === link.path;
+                return (
+                  <Link
+                    key={link.name}
+                    to={link.path}
+                    className={`relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
+                      isActive
+                        ? "text-blue-500 dark:text-blue-400"
+                        : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5"
+                    }`}
+                  >
+                    {isActive && (
+                      <motion.div
+                        layoutId="activeNavIndicator"
+                        className="absolute inset-0 bg-blue-500/10 dark:bg-blue-500/10 rounded-xl border border-blue-500/15"
+                        transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                    {link.icon}
+                    <span>{link.name}</span>
+                  </Link>
+                );
+              })}
+
+              <div className="h-6 w-px bg-gray-200 dark:bg-white/10 mx-2" />
+
+              {/* Theme Toggle */}
+              <ThemeToggle />
+
+              {/* User Dropdown / Logout */}
+              {user ? (
+                <div className="flex items-center gap-3 ml-3">
+                  <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/5">
+                    <User size={14} className="text-muted-foreground" />
+                    <span className="text-xs font-bold text-foreground max-w-[100px] truncate">
+                      {user.name || user.email}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-2.5 rounded-xl text-red-500 hover:bg-red-500/10 active:bg-red-500/25 border border-transparent hover:border-red-500/10 transition-all cursor-pointer"
+                    title="Logout"
+                  >
+                    <LogOut size={18} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Mobile menu button */}
+            <div className="md:hidden flex items-center gap-2">
               <ThemeToggle />
               <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="p-2 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer"
               >
                 {isOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
@@ -147,67 +142,51 @@ const Navbar = ({ userType, setUserType }) => {
           </div>
         </div>
 
-        {/* Mobile Menu */}
+        {/* Mobile menu */}
         <AnimatePresence>
           {isOpen && (
             <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="md:hidden overflow-hidden border-t border-gray-200 dark:border-gray-800"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden border-b border-gray-100 dark:border-white/10 bg-white dark:bg-black/95 backdrop-blur-2xl"
             >
-              <div className="glass-panel text-white p-4 space-y-2 m-2 rounded-2xl">
-                {navLinks.map((link, index) => {
-                  // If not logged in: show Home, Track, and Driver
-                  if (!userType && link.name === "Student") return null;
-
-                  // If driver: only show Driver (Dashboard)
-                  if (userType === "driver" && link.name !== "Driver")
-                    return null;
-
-                  // If student: hide Driver link
-                  if (userType === "student" && link.name === "Driver")
-                    return null;
-
-                  if (link.name === "Login" && userType) return null;
+              <div className="px-4 pt-2 pb-6 space-y-2">
+                {navLinks.map((link) => {
+                  const isActive = location.pathname === link.path;
                   return (
                     <motion.div
                       key={link.name}
                       initial={{ x: -20, opacity: 0 }}
                       animate={{ x: 0, opacity: 1 }}
-                      transition={{ delay: index * 0.1 }}
                     >
                       <Link
                         to={link.path}
                         onClick={() => setIsOpen(false)}
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                          location.pathname === link.path
-                            ? "bg-blue-600 text-white shadow-lg shadow-blue-500/30"
-                            : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                          isActive
+                            ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                            : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5"
                         }`}
                       >
                         {link.icon}
-                        <span className="font-medium">
-                          {link.name === "Driver" && userType === "driver"
-                            ? "Dashboard"
-                            : link.name}
-                        </span>
+                        <span className="font-semibold">{link.name}</span>
                       </Link>
                     </motion.div>
                   );
                 })}
-                {userType && (
+                {user && (
                   <motion.div
                     initial={{ x: -20, opacity: 0 }}
                     animate={{ x: 0, opacity: 1 }}
-                    transition={{ delay: navLinks.length * 0.1 }}
+                    transition={{ delay: 0.1 }}
                   >
                     <button
                       onClick={() => {
                         handleLogout();
                         setIsOpen(false);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all font-medium"
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/10 transition-all font-semibold cursor-pointer"
                     >
                       <LogOut size={18} />
                       Logout
@@ -221,6 +200,4 @@ const Navbar = ({ userType, setUserType }) => {
       </motion.nav>
     </>
   );
-};
-
-export default Navbar;
+}

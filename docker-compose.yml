@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # MongoDB database service
+  db:
+    image: mongo:6.0
+    container_name: shuttle_tracker_db
+    ports:
+      - "27017:27017"
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate() }" | mongosh --port 27017 --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 5s
+
+  # Initialization helper to set up MongoDB Replica Set rs0
+  db-init:
+    image: mongo:6.0
+    depends_on:
+      - db
+    restart: "no"
+    entrypoint: [ "bash", "-c", "sleep 3 && mongosh --host db:27017 --eval 'try { rs.initiate() } catch (err) { console.log(\"Replica set already initiated\") }'" ]
+
+  # Express Backend service
+  backend:
+    build: ./backend
+    container_name: shuttle_tracker_backend
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - DATABASE_URL=mongodb://db:27017/shuttle_tracker?replicaSet=rs0&directConnection=true
+      - JWT_SECRET=super_secret_shuttle_tracker_jwt_key_12345
+      - NODE_ENV=production
+      - GOOGLE_CLIENT_ID=mock_google_client_id
+      - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:80
+    depends_on:
+      db:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+
+  # Vite Frontend service
+  frontend:
+    build: ./frontend
+    container_name: shuttle_tracker_frontend
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_URL=http://localhost:5001
+      - VITE_SOCKET_URL=http://localhost:5001
+      - VITE_GOOGLE_CLIENT_ID=mock_google_client_id
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:

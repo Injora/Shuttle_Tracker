@@ -3,15 +3,47 @@ const { OAuth2Client } = require("google-auth-library");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const prisma = require("../lib/prisma");
+const { authenticate, attachUser } = require("../middleware/auth");
 const router = express.Router();
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
 const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
+/**
+ * Generate a token and set it as an HTTP-only cookie.
+ */
+function handleAuthSuccess(res, user) {
+  const token = jwt.sign(
+    { id: user.id, email: user.email, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  return {
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      picture: user.picture,
+      mobileNumber: user.mobileNumber,
+      licenseNumber: user.licenseNumber,
+    },
+  };
+}
+
 // POST /api/auth/signup
 router.post("/signup", async (req, res) => {
-  const { email, password, name, role } = req.body;
+  const { email, password, name, role, mobileNumber, licenseNumber } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
@@ -29,36 +61,13 @@ router.post("/signup", async (req, res) => {
         password: hashedPassword,
         name,
         role: role || "student",
+        mobileNumber,
+        licenseNumber,
       },
     });
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      {
-        expiresIn: "7d",
-      },
-    );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.status(201).json({
-      token,
-      user: {
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        busNumber: user.busNumber,
-        driverName: user.driverName,
-        mobileNumber: user.mobileNumber,
-        currentLocation: user.currentLocation,
-      },
-    });
+    const responseData = handleAuthSuccess(res, user);
+    res.status(201).json(responseData);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -82,34 +91,8 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      {
-        expiresIn: "7d",
-      },
-    );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json({
-      token,
-      user: {
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        busNumber: user.busNumber,
-        driverName: user.driverName,
-        mobileNumber: user.mobileNumber,
-        currentLocation: user.currentLocation,
-        picture: user.picture,
-      },
-    });
+    const responseData = handleAuthSuccess(res, user);
+    res.json(responseData);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -127,7 +110,7 @@ router.post("/google", async (req, res) => {
       audience: GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
-    const { email, name, picture, sub } = payload;
+    const { email, name, picture } = payload;
 
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
@@ -136,99 +119,57 @@ router.post("/google", async (req, res) => {
           email,
           name,
           picture,
-          role: req.body.role || "student", // Allow passing role
+          role: req.body.role || "student",
         },
       });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      {
-        expiresIn: "7d",
-      },
-    );
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json({
-      token,
-      user: {
-        email: user.email,
-        name: user.name,
-        picture: user.picture,
-        role: user.role,
-        busNumber: user.busNumber,
-        driverName: user.driverName,
-        mobileNumber: user.mobileNumber,
-        currentLocation: user.currentLocation,
-      },
-    });
+    const responseData = handleAuthSuccess(res, user);
+    res.json(responseData);
   } catch (err) {
     res.status(401).json({ error: "Invalid Google token" });
   }
 });
 
 // GET /api/auth/me (Check current user)
-router.get("/me", async (req, res) => {
-  const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "Unauthenticated" });
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await prisma.user.findUnique({ where: { id: decoded.id } });
-    if (!user) return res.status(404).json({ error: "User not found" });
-    res.json({
-      user: {
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        picture: user.picture,
-        busNumber: user.busNumber,
-        driverName: user.driverName,
-        mobileNumber: user.mobileNumber,
-        currentLocation: user.currentLocation,
-      },
-    });
-  } catch (err) {
-    res.status(401).json({ error: "Invalid token" });
-  }
+router.get("/me", authenticate, attachUser, (req, res) => {
+  res.json({
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      name: req.user.name,
+      role: req.user.role,
+      picture: req.user.picture,
+      mobileNumber: req.user.mobileNumber,
+      licenseNumber: req.user.licenseNumber,
+    },
+  });
 });
 
 // PUT /api/auth/update-profile
-router.put("/update-profile", async (req, res) => {
-  const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "Unauthenticated" });
-
+router.put("/update-profile", authenticate, attachUser, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const { busNumber, driverName, mobileNumber, currentLocation } = req.body;
+    const { name, mobileNumber, licenseNumber } = req.body;
 
     const user = await prisma.user.update({
-      where: { id: decoded.id },
+      where: { id: req.userId },
       data: {
-        busNumber,
-        driverName,
+        name,
         mobileNumber,
-        currentLocation,
+        licenseNumber,
       },
     });
 
     res.json({
       message: "Profile updated successfully",
       user: {
+        id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
-        busNumber: user.busNumber,
-        driverName: user.driverName,
+        picture: user.picture,
         mobileNumber: user.mobileNumber,
-        currentLocation: user.currentLocation,
+        licenseNumber: user.licenseNumber,
       },
     });
   } catch (err) {

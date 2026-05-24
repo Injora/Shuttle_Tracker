@@ -1,22 +1,24 @@
-import React, { useState } from "react";
-import { Home, MapPin, User, LogIn } from "lucide-react";
+import React from "react";
+import { Home as HomeIcon, MapPin, User, LogIn } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { Dock, DockIcon } from "./ui/Dock";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
+import { useAuth } from "../contexts/AuthContext";
 
-function Footer({ userType }) {
+export default function Footer() {
   const location = useLocation();
+  const { userType } = useAuth();
 
   const dockItems = [
-    { title: "Home", icon: Home, href: "/" },
+    { title: "Home", icon: HomeIcon, href: "/" },
     { title: "Track", icon: MapPin, href: "/track-shuttle" },
     ...(userType === "driver"
-      ? [{ title: "Profile", icon: User, href: "/driver" }]
+      ? [{ title: "Driver Hub", icon: User, href: "/driver" }]
       : []),
     ...(userType === "student"
-      ? [{ title: "Profile", icon: User, href: "/student" }]
+      ? [{ title: "Student Panel", icon: User, href: "/student" }]
       : []),
-    ...(!userType ? [{ title: "Login", icon: LogIn, href: "/driver" }] : []),
+    ...(!userType ? [{ title: "Login", icon: LogIn, href: "/login" }] : []),
   ];
 
   return (
@@ -37,11 +39,11 @@ function Footer({ userType }) {
               {location.pathname === item.href && (
                 <motion.div
                   layoutId="activeDock"
-                  className="absolute -bottom-2 w-1 h-1 bg-blue-500 rounded-full"
+                  className="absolute -bottom-2 w-1.5 h-1.5 bg-blue-500 rounded-full"
                 />
               )}
               <item.icon
-                className={`w-6 h-6 ${location.pathname === item.href ? "text-blue-500" : "text-gray-600 dark:text-gray-300"}`}
+                className={`w-5 h-5 ${location.pathname === item.href ? "text-blue-500" : "text-gray-600 dark:text-gray-300"}`}
               />
             </Link>
           </DockIcon>
@@ -50,5 +52,3 @@ function Footer({ userType }) {
     </div>
   );
 }
-
-export default Footer;

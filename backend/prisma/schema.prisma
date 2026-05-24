@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,25 +10,76 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Bus: the physical vehicle ───────────────────────────
 model Bus {
-  id              String   @id @default(auto()) @map("_id") @db.ObjectId
-  busNumber       String   @unique
-  driverName      String
-  currentLocation String
-  status          String   @default("In Service")
-  lastUpdated     DateTime @default(now())
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  busNumber String   @unique
+  capacity  Int      @default(40)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  shifts Shift[]
 }
 
+// ── User: student or driver ─────────────────────────────
 model User {
-  id              String   @id @default(auto()) @map("_id") @db.ObjectId
-  email           String   @unique
-  password        String?  // Optional for Google users
-  name            String?
-  picture         String?
-  role            String   @default("student") // student or driver
-  busNumber       String?  // For drivers
-  driverName      String?  // For drivers
-  mobileNumber    String?  // For drivers
-  currentLocation String?  // For drivers
-  createdAt       DateTime @default(now())
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  email         String   @unique
+  password      String?
+  name          String?
+  picture       String?
+  role          String   @default("student") // "student" | "driver" | "admin"
+  mobileNumber  String?
+  licenseNumber String? // For drivers
+  createdAt     DateTime @default(now())
+
+  shifts      Shift[]      @relation("DriverShifts")
+  busRequests BusRequest[]
+}
+
+// ── Shift: driver ↔ bus session with state machine ──────
+model Shift {
+  id       String    @id @default(auto()) @map("_id") @db.ObjectId
+  busId    String    @db.ObjectId
+  driverId String    @db.ObjectId
+  state    String    @default("Idle") // Idle | En_Route_YS2 | Waiting_YS2 | En_Route_YS1 | Waiting_YS1 | Returning_College
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+
+  // Latest GPS position (updated in real-time)
+  latitude  Float?
+  longitude Float?
+  heading   Float? // compass bearing in degrees
+  speed     Float? // m/s
+  lastGpsAt DateTime?
+
+  bus        Bus             @relation(fields: [busId], references: [id])
+  driver     User            @relation("DriverShifts", fields: [driverId], references: [id])
+  dispatches DispatchEvent[]
+}
+
+// ── BusRequest: student taps "Request Bus" ──────────────
+model BusRequest {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  studentId  String    @db.ObjectId
+  hostel     String // "YS1" | "YS2"
+  status     String    @default("waiting") // "waiting" | "assigned" | "boarded" | "expired" | "cancelled"
+  requestedAt DateTime @default(now())
+  assignedAt  DateTime?
+  dispatchId  String?  @db.ObjectId
+
+  student  User           @relation(fields: [studentId], references: [id])
+  dispatch DispatchEvent? @relation(fields: [dispatchId], references: [id])
+}
+
+// ── DispatchEvent: threshold triggered, bus assigned ────
+model DispatchEvent {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  shiftId      String   @db.ObjectId
+  trigger      String // "threshold_10" | "timeout_20min"
+  studentCount Int
+  createdAt    DateTime @default(now())
+
+  shift    Shift        @relation(fields: [shiftId], references: [id])
+  requests BusRequest[]
 }
