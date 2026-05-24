@@ -25,6 +25,15 @@ const STATES = {
   RETURNING_COLLEGE: "Returning_College",
 };
 
+const TRANSITIONS = {
+  [STATES.IDLE]: STATES.EN_ROUTE_YS2,
+  [STATES.EN_ROUTE_YS2]: STATES.WAITING_YS2,
+  [STATES.WAITING_YS2]: STATES.EN_ROUTE_YS1,
+  [STATES.EN_ROUTE_YS1]: STATES.WAITING_YS1,
+  [STATES.WAITING_YS1]: STATES.RETURNING_COLLEGE,
+  [STATES.RETURNING_COLLEGE]: STATES.IDLE,
+};
+
 const STATE_COLORS = {
   [STATES.IDLE]: "bg-gray-500/10 text-gray-400 border-gray-500/20",
   [STATES.EN_ROUTE_YS2]: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
@@ -194,15 +203,19 @@ export default function BusCard({
                     <div className="grid grid-cols-2 gap-2">
                       {Object.entries(STATES).map(([key, value]) => {
                         const isCurrent = activeShift.state === value;
+                        const isValidNext = TRANSITIONS[activeShift.state] === value;
                         return (
                           <button
                             key={key}
                             type="button"
                             onClick={() => onTransitionState(value)}
-                            className={`py-2 rounded-lg text-xs font-bold border transition-all duration-200 cursor-pointer ${
+                            disabled={!isValidNext && !isCurrent}
+                            className={`py-2 rounded-lg text-xs font-bold border transition-all duration-300 ${
                               isCurrent
-                                ? "bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20"
-                                : "bg-white/5 text-muted-foreground hover:text-foreground border-white/5 hover:bg-white/10"
+                                ? "bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/20 cursor-default"
+                                : isValidNext
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20 cursor-pointer animate-pulse-subtle"
+                                  : "bg-white/5 text-muted-foreground/35 border-white/5 opacity-40 cursor-not-allowed"
                             }`}
                           >
                             {STATE_LABELS[value]}

@@ -10,6 +10,7 @@
 
 const prisma = require("../lib/prisma");
 const stateMachine = require("./stateMachine");
+const socket = require("../socket");
 
 // ── Constants ───────────────────────────────────────────────────────────────
 /** Number of waiting requests that triggers an automatic dispatch. */
@@ -234,14 +235,14 @@ async function triggerDispatch(trigger, io) {
 
     const { dispatchEvent, idleShift, requestCount } = result;
 
-    // 5. Transition shift state (outside $transaction because stateMachine
-    //    manages its own Prisma call and the Socket.IO broadcast)
     try {
       await stateMachine.transition(
         idleShift.id,
         stateMachine.STATES.EN_ROUTE_YS2,
         io
       );
+      // Sync in-memory driver state for live student tracking
+      socket.updateShiftState(idleShift.id, stateMachine.STATES.EN_ROUTE_YS2);
     } catch (transitionErr) {
       // Log but don't crash — the dispatch records are already persisted
       console.error(

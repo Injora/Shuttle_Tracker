@@ -20,16 +20,20 @@ const ROUTE_PATH = [
   [ZONES.YS1.lat, ZONES.YS1.lng],
 ];
 
-// Helper component to center and fly map to active bus
+// Helper component to center and fly map to active bus or fit route bounds
 function MapUpdater({ activeLocation }) {
   const map = useMap();
   useEffect(() => {
-    if (activeLocation) {
+    if (activeLocation && activeLocation.latitude && activeLocation.longitude) {
       map.flyTo(
         [activeLocation.latitude, activeLocation.longitude],
-        15,
+        16,
         { animate: true, duration: 1.5 }
       );
+    } else {
+      // Fit map bounds to show the entire college <-> YS2 <-> YS1 route perfectly!
+      const bounds = L.latLngBounds(ROUTE_PATH);
+      map.fitBounds(bounds, { padding: [50, 50], animate: true, duration: 1.2 });
     }
   }, [activeLocation, map]);
   return null;
@@ -142,8 +146,8 @@ export default function TrackShuttle({ driverLocation }) {
         scrollWheelZoom={true}
         zoomControl={false}
       >
-        {/* Fly to active shuttle if previewing */}
-        {buses.length > 0 && <MapUpdater activeLocation={buses[0]} />}
+        {/* Fly to active shuttle or center on route stops */}
+        <MapUpdater activeLocation={buses.length > 0 ? buses[0] : null} />
         
         {/* Tile Provider: Sleek CartoDB Dark Matter / Voyager Map Tiles */}
         <TileLayer

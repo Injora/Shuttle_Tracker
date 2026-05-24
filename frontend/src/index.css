@@ -118,3 +118,12 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/30 transition-colors;
 }
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(0.985); }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s infinite ease-in-out;
+}
