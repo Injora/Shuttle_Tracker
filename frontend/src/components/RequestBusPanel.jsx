@@ -101,7 +101,15 @@ export default function RequestBusPanel() {
         setMyRequest(data);
         toast.success(`Successfully requested shuttle to ${hostel}!`);
       } else {
-        toast.error(data.error || "Failed to request shuttle");
+        // Handle duplicate request — re-sync UI state with server
+        if (data.error === "You already have an active request" && data.request) {
+          setMyRequest(data.request);
+          toast("You already have an active request.", { icon: "ℹ️" });
+        } else if (res.status === 429) {
+          toast.error("Too many requests. Please wait a moment.");
+        } else {
+          toast.error(data.error || "Failed to request shuttle");
+        }
       }
     } catch (err) {
       toast.error("Network error. Please try again.");
@@ -109,6 +117,7 @@ export default function RequestBusPanel() {
       setIsRequesting(false);
     }
   };
+
 
   // 4. Handle Cancel
   const handleCancelRequest = async () => {

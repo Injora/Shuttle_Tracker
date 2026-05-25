@@ -1,8 +1,21 @@
 const express = require("express");
+const rateLimit = require("express-rate-limit");
 const { authenticate, requireRole } = require("../middleware/auth");
 const { getIO } = require("../socket");
 const dispatchManager = require("../services/dispatchManager");
+const { updateShiftState } = require("../socket");
 const router = express.Router();
+
+// ── Rate Limiter ────────────────────────────────────────────────────────────
+// Prevent a single student from spamming the request endpoint.
+const requestLimiter = rateLimit({
+  windowMs: 60_000, // 1 minute window
+  max: 5,           // max 5 attempts per student per minute
+  keyGenerator: (req) => req.userId,
+  message: { error: "Too many requests. Please wait before trying again." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // GET /api/dispatch/queue-status - Get current student waiting counts
 router.get("/queue-status", authenticate, async (req, res) => {
@@ -25,26 +38,33 @@ router.get("/my-request", authenticate, requireRole("student"), async (req, res)
 });
 
 // POST /api/dispatch/request - Request a bus (Student only)
-router.post("/request", authenticate, requireRole("student"), async (req, res) => {
+// Rate-limited to prevent spam. Duplicate detection is atomic inside the transaction.
+router.post("/request", authenticate, requireRole("student"), requestLimiter, async (req, res) => {
   const { hostel } = req.body;
   if (!hostel || !["YS1", "YS2"].includes(hostel)) {
     return res.status(400).json({ error: "Invalid hostel selection. Must be YS1 or YS2." });
   }
 
   try {
-    // Check if student already has an active request
-    const existing = await dispatchManager.getStudentRequest(req.userId);
-    if (existing) {
+    const io = getIO();
+    const result = await dispatchManager.addRequest(
+      req.userId,
+      hostel,
+      io,
+      // onDispatchStateSync callback — syncs the in-memory driver location state
+      (shiftId, newState) => {
+        updateShiftState(shiftId, newState);
+      }
+    );
+    res.status(201).json(result.request);
+  } catch (err) {
+    // Handle the DUPLICATE_REQUEST error from the atomic transaction check
+    if (err.code === "DUPLICATE_REQUEST") {
       return res.status(400).json({
         error: "You already have an active request",
-        request: existing,
+        request: err.existingRequest,
       });
     }
-
-    const io = getIO();
-    const request = await dispatchManager.addRequest(req.userId, hostel, io);
-    res.status(201).json(request);
-  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

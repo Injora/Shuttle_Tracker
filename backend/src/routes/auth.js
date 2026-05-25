@@ -1,14 +1,12 @@
 const express = require("express");
-const { OAuth2Client } = require("google-auth-library");
+
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const prisma = require("../lib/prisma");
 const { authenticate, attachUser } = require("../middleware/auth");
 const router = express.Router();
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
-const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 /**
  * Generate a token and set it as an HTTP-only cookie.
@@ -95,39 +93,6 @@ router.post("/login", async (req, res) => {
     res.json(responseData);
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// POST /api/auth/google
-router.post("/google", async (req, res) => {
-  const { credential } = req.body;
-  if (!credential) {
-    return res.status(400).json({ error: "No credential provided" });
-  }
-  try {
-    const ticket = await client.verifyIdToken({
-      idToken: credential,
-      audience: GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    const { email, name, picture } = payload;
-
-    let user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email,
-          name,
-          picture,
-          role: req.body.role || "student",
-        },
-      });
-    }
-
-    const responseData = handleAuthSuccess(res, user);
-    res.json(responseData);
-  } catch (err) {
-    res.status(401).json({ error: "Invalid Google token" });
   }
 });
 

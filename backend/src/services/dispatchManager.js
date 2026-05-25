@@ -4,13 +4,17 @@
  *   Students create bus requests; once the queue reaches DISPATCH_THRESHOLD
  *   (or a timeout fires), the system atomically assigns all waiting
  *   requests to an idle shift and transitions the bus state.
+ *
+ *   IMPORTANT: All queue mutations run inside Prisma $transaction to prevent
+ *   race conditions when multiple students click "Request" simultaneously.
+ *   The circular dependency on ../socket has been removed — io and helper
+ *   functions are always passed as parameters from the caller.
  */
 
 "use strict";
 
 const prisma = require("../lib/prisma");
 const stateMachine = require("./stateMachine");
-const socket = require("../socket");
 
 // ── Constants ───────────────────────────────────────────────────────────────
 /** Number of waiting requests that triggers an automatic dispatch. */
@@ -25,16 +29,40 @@ const TIMEOUT_MINUTES = 20;
  * Create a new bus request for a student and check whether the dispatch
  * threshold has been reached.
  *
+ * The ENTIRE operation runs inside a Prisma $transaction to prevent race
+ * conditions:
+ *   1. Atomic duplicate check (prevents double-click / concurrent requests)
+ *   2. Create the BusRequest
+ *   3. Count all waiting requests
+ *   4. If threshold met → run dispatch atomically inside the same transaction
+ *
  * @param {string} studentId - The ObjectId of the requesting student.
  * @param {string} hostel    - The hostel stop (`"YS1"` or `"YS2"`).
  * @param {import("socket.io").Server} io - Socket.IO server instance.
- * @returns {Promise<Object>} The newly-created BusRequest document.
- * @throws {Error} On database failure.
+ * @param {Function} [onDispatchStateSync] - Optional callback to sync in-memory
+ *   driver state after dispatch (avoids circular import of socket module).
+ * @returns {Promise<Object>} `{ request, dispatched }`.
+ * @throws {Error} `DUPLICATE_REQUEST` if the student already has an active request.
  */
-async function addRequest(studentId, hostel, io) {
-  try {
-    // Create the request
-    const request = await prisma.busRequest.create({
+async function addRequest(studentId, hostel, io, onDispatchStateSync) {
+  const result = await prisma.$transaction(async (tx) => {
+    // 1. Atomic duplicate check — inside the transaction so no TOCTOU race
+    const existing = await tx.busRequest.findFirst({
+      where: {
+        studentId,
+        status: { in: ["waiting", "assigned"] },
+      },
+    });
+
+    if (existing) {
+      const err = new Error("You already have an active request");
+      err.code = "DUPLICATE_REQUEST";
+      err.existingRequest = existing;
+      throw err;
+    }
+
+    // 2. Create the request
+    const request = await tx.busRequest.create({
       data: {
         studentId,
         hostel,
@@ -42,30 +70,72 @@ async function addRequest(studentId, hostel, io) {
       },
     });
 
-    // Count all currently waiting requests
-    const totalCount = await prisma.busRequest.count({
+    // 3. Count all currently waiting requests (within the same snapshot)
+    const totalCount = await tx.busRequest.count({
       where: { status: "waiting" },
     });
 
-    // Check threshold
+    // 4. If threshold reached → dispatch inside the same transaction
+    let dispatchResult = null;
     if (totalCount >= DISPATCH_THRESHOLD) {
       console.log(
         `[dispatchManager] Threshold reached (${totalCount}/${DISPATCH_THRESHOLD}) — triggering dispatch.`
       );
-      await triggerDispatch("threshold_10", io);
+      dispatchResult = await _internalDispatch(tx, "threshold_10");
     }
 
-    // Broadcast updated queue status
-    const queueStatus = await getQueueStatus();
-    if (io) {
-      io.emit("queue:update", queueStatus);
-    }
+    return { request, totalCount, dispatchResult };
+  });
 
-    return request;
-  } catch (err) {
-    console.error("[dispatchManager] addRequest error:", err);
-    throw err;
+  // ── Post-transaction side effects (Socket.IO broadcasts) ──────────────
+  // These happen AFTER the transaction commits, so they reflect committed state.
+
+  // Broadcast updated queue status
+  const queueStatus = await getQueueStatus();
+  if (io) {
+    io.emit("queue:update", queueStatus);
   }
+
+  // If a dispatch happened, perform the state transition and broadcast
+  if (result.dispatchResult) {
+    const { dispatchEvent, idleShift, requestCount } = result.dispatchResult;
+
+    try {
+      await stateMachine.transition(
+        idleShift.id,
+        stateMachine.STATES.EN_ROUTE_YS2,
+        io
+      );
+      // Sync in-memory driver state (if callback provided)
+      if (typeof onDispatchStateSync === "function") {
+        onDispatchStateSync(idleShift.id, stateMachine.STATES.EN_ROUTE_YS2);
+      }
+    } catch (transitionErr) {
+      // Log but don't crash — the dispatch records are already persisted
+      console.error(
+        "[dispatchManager] Failed to transition shift after dispatch:",
+        transitionErr
+      );
+    }
+
+    // Broadcast dispatch event
+    if (io) {
+      io.emit("dispatch:triggered", {
+        dispatchId: dispatchEvent.id,
+        shiftId: idleShift.id,
+        trigger: "threshold_10",
+        studentCount: requestCount,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    console.log(
+      `[dispatchManager] Dispatch triggered (threshold_10): ` +
+        `shift=${idleShift.id}, students=${requestCount}.`
+    );
+  }
+
+  return { request: result.request, dispatched: !!result.dispatchResult };
 }
 
 /**
@@ -163,69 +233,20 @@ async function getStudentRequest(studentId) {
 /**
  * Atomically dispatch a bus to fulfil all waiting requests.
  *
- * Runs inside a Prisma `$transaction` to guarantee atomicity:
- * 1. Find an active shift in `Idle` state.
- * 2. Collect all waiting BusRequests.
- * 3. Create a DispatchEvent record.
- * 4. Mark every waiting request as `assigned`.
- * 5. Transition the shift state to `En_Route_YS2`.
- * 6. Broadcast a `dispatch:triggered` Socket.IO event.
+ * This is the PUBLIC entry point called from the timeout checker and
+ * any external trigger. It wraps `_internalDispatch` in its own
+ * `$transaction`, then performs side effects (state transition + broadcast).
  *
  * @param {string} trigger - Dispatch trigger label (e.g. `"threshold_10"`, `"timeout_20min"`).
  * @param {import("socket.io").Server} io - Socket.IO server instance.
+ * @param {Function} [onDispatchStateSync] - Optional callback to sync in-memory state.
  * @returns {Promise<Object|null>} The created DispatchEvent, or `null` if
  *   no idle shift was available.
  */
-async function triggerDispatch(trigger, io) {
+async function triggerDispatch(trigger, io, onDispatchStateSync) {
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Find an idle shift
-      const idleShift = await tx.shift.findFirst({
-        where: { state: stateMachine.STATES.IDLE, endedAt: null },
-      });
-
-      if (!idleShift) {
-        console.warn(
-          "[dispatchManager] triggerDispatch: no idle shift available — skipping."
-        );
-        return null;
-      }
-
-      // 2. Collect all waiting requests
-      const waitingRequests = await tx.busRequest.findMany({
-        where: { status: "waiting" },
-      });
-
-      if (waitingRequests.length === 0) {
-        console.warn(
-          "[dispatchManager] triggerDispatch: no waiting requests — skipping."
-        );
-        return null;
-      }
-
-      const requestIds = waitingRequests.map((r) => r.id);
-
-      // 3. Create DispatchEvent
-      const dispatchEvent = await tx.dispatchEvent.create({
-        data: {
-          shiftId: idleShift.id,
-          trigger,
-          studentCount: waitingRequests.length,
-        },
-      });
-
-      // 4. Update all waiting requests → assigned
-      const now = new Date();
-      await tx.busRequest.updateMany({
-        where: { id: { in: requestIds } },
-        data: {
-          status: "assigned",
-          assignedAt: now,
-          dispatchId: dispatchEvent.id,
-        },
-      });
-
-      return { dispatchEvent, idleShift, requestCount: waitingRequests.length };
+      return _internalDispatch(tx, trigger);
     });
 
     // Nothing to do if the transaction short-circuited
@@ -241,8 +262,10 @@ async function triggerDispatch(trigger, io) {
         stateMachine.STATES.EN_ROUTE_YS2,
         io
       );
-      // Sync in-memory driver state for live student tracking
-      socket.updateShiftState(idleShift.id, stateMachine.STATES.EN_ROUTE_YS2);
+      // Sync in-memory driver state
+      if (typeof onDispatchStateSync === "function") {
+        onDispatchStateSync(idleShift.id, stateMachine.STATES.EN_ROUTE_YS2);
+      }
     } catch (transitionErr) {
       // Log but don't crash — the dispatch records are already persisted
       console.error(
@@ -251,7 +274,7 @@ async function triggerDispatch(trigger, io) {
       );
     }
 
-    // 6. Broadcast dispatch event
+    // Broadcast dispatch event
     if (io) {
       io.emit("dispatch:triggered", {
         dispatchId: dispatchEvent.id,
@@ -272,6 +295,74 @@ async function triggerDispatch(trigger, io) {
     console.error("[dispatchManager] triggerDispatch error:", err);
     throw err;
   }
+}
+
+// ── Internal Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Core dispatch logic meant to run INSIDE an existing Prisma transaction.
+ *
+ * 1. Find an active shift in `Idle` state.
+ * 2. Collect all waiting BusRequests.
+ * 3. Create a DispatchEvent record.
+ * 4. Mark every waiting request as `assigned`.
+ *
+ * Does NOT perform state transitions or Socket.IO broadcasts — those are
+ * side effects that the caller handles AFTER the transaction commits.
+ *
+ * @param {import("@prisma/client").Prisma.TransactionClient} tx - Transaction client.
+ * @param {string} trigger - Dispatch trigger label.
+ * @returns {Promise<{ dispatchEvent: Object, idleShift: Object, requestCount: number } | null>}
+ * @private
+ */
+async function _internalDispatch(tx, trigger) {
+  // 1. Find an idle shift
+  const idleShift = await tx.shift.findFirst({
+    where: { state: stateMachine.STATES.IDLE, endedAt: { isSet: false } },
+  });
+
+  if (!idleShift) {
+    console.warn(
+      "[dispatchManager] _internalDispatch: no idle shift available — skipping."
+    );
+    return null;
+  }
+
+  // 2. Collect all waiting requests
+  const waitingRequests = await tx.busRequest.findMany({
+    where: { status: "waiting" },
+  });
+
+  if (waitingRequests.length === 0) {
+    console.warn(
+      "[dispatchManager] _internalDispatch: no waiting requests — skipping."
+    );
+    return null;
+  }
+
+  const requestIds = waitingRequests.map((r) => r.id);
+
+  // 3. Create DispatchEvent
+  const dispatchEvent = await tx.dispatchEvent.create({
+    data: {
+      shiftId: idleShift.id,
+      trigger,
+      studentCount: waitingRequests.length,
+    },
+  });
+
+  // 4. Update all waiting requests → assigned
+  const now = new Date();
+  await tx.busRequest.updateMany({
+    where: { id: { in: requestIds } },
+    data: {
+      status: "assigned",
+      assignedAt: now,
+      dispatchId: dispatchEvent.id,
+    },
+  });
+
+  return { dispatchEvent, idleShift, requestCount: waitingRequests.length };
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────

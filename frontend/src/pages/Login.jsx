@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { LogIn, Mail, Lock, ArrowRight, User, Car } from "lucide-react";
-import { GoogleLogin } from "@react-oauth/google";
+import { Lock, Mail, LogIn, ArrowRight } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import toast, { Toaster } from "react-hot-toast";
 
@@ -12,16 +11,6 @@ export default function Login() {
   const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [selectedRole, setSelectedRole] = useState(
-    location.state?.role || "student",
-  );
-
-  useEffect(() => {
-    if (location.state?.role) {
-      setSelectedRole(location.state.role);
-    }
-  }, [location.state]);
-
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
@@ -50,35 +39,6 @@ export default function Login() {
     }
   };
 
-  const handleGoogleSuccess = async (credentialResponse) => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/auth/google`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            credential: credentialResponse.credential,
-            role: selectedRole,
-          }),
-        },
-      );
-      const data = await response.json();
-      if (response.ok) {
-        login(data.token, data.user);
-        toast.success("Welcome back!");
-        if (data.user.role === "driver") {
-          navigate("/driver");
-        } else {
-          navigate("/");
-        }
-      } else {
-        toast.error(data.error || "Google login failed");
-      }
-    } catch (err) {
-      toast.error("Network error with Google login");
-    }
-  };
 
   return (
     <div className="min-h-[calc(100vh-140px)] w-full flex items-center justify-center p-4 relative overflow-hidden">
@@ -146,60 +106,6 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-8">
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">
-                  Or continue with Google as:
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 p-1 bg-white/5 border border-white/5 rounded-2xl mb-4">
-                <button
-                  type="button"
-                  onClick={() => setSelectedRole("student")}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
-                    selectedRole === "student"
-                      ? "bg-white text-black shadow-lg"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <User size={14} />
-                  Student
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRole("driver")}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
-                    selectedRole === "driver"
-                      ? "bg-white text-black shadow-lg"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Car size={14} />
-                  Driver
-                </button>
-              </div>
-
-              <div className="flex justify-center">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => toast.error("Google Login Failed")}
-                  useOneTap
-                  theme="filled_blue"
-                  shape="pill"
-                  size="large"
-                  text="continue_with"
-                  width="100%"
-                />
-              </div>
-            </div>
-          </div>
 
           <p className="text-center mt-6 text-sm text-muted-foreground">
             Don't have an account?{" "}

@@ -15,6 +15,16 @@ COPY . .
 ENV DATABASE_URL="mongodb+srv://dummy:dummy@dummy.mongodb.net/dummy"
 RUN npx prisma generate
 
+# Create non-root user for production security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Ensure the appuser owns the working directory
+RUN chown -R appuser:appgroup /app
+USER appuser
+
 EXPOSE 5001
+
+# Health check — validates the Express server is responsive
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+  CMD wget -qO- http://localhost:5001/api/health || exit 1
 
 CMD ["node", "src/index.js"]

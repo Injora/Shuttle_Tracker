@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useSocket } from "../contexts/SocketContext";
 import RequestBusPanel from "../components/RequestBusPanel";
 import CountdownTimer from "../components/CountdownTimer";
+import StatusBanner from "../components/StatusBanner";
 import TrackShuttle from "./TrackShuttle";
 import { motion, AnimatePresence } from "framer-motion";
 import { Map, Clock, AlertCircle } from "lucide-react";
@@ -143,12 +144,24 @@ export default function Student() {
     (s) => (s.state === "Waiting_YS2" || s.state === "Waiting_YS1") && s.remainingSeconds != null
   );
 
+  // Find the primary active shift for the StatusBanner
+  const primaryShift = activeShifts.length > 0 ? activeShifts[0] : null;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="space-y-8 py-4 min-h-[90vh]"
     >
+      {/* Global Status Banner — broadcasts bus state to students */}
+      {primaryShift && (
+        <StatusBanner
+          state={primaryShift.state}
+          busNumber={primaryShift.bus?.busNumber || "—"}
+          countdown={primaryShift.remainingSeconds}
+        />
+      )}
+
       {/* Header Info */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>

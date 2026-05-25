@@ -45,9 +45,30 @@ export default function Driver() {
       setQueueStatus(data);
     };
 
+    const onStateChange = (data) => {
+      // Update the active shift state when it changes on the backend
+      setActiveShift((prev) => {
+        if (!prev || prev.id !== data.shiftId) return prev;
+        return { ...prev, state: data.toState };
+      });
+      toast.success(data.message || `Status updated to: ${data.toState.replace("_", " ")}`);
+    };
+
+    const onDispatchTriggered = (data) => {
+      toast.success(
+        `DISPATCH TRIGGERED! Route to Hostel. (${data.studentCount} students waiting)`,
+        { duration: 10000, icon: "🚀" }
+      );
+    };
+
     socket.on("queue:update", onQueueUpdate);
+    socket.on("bus:state-change", onStateChange);
+    socket.on("dispatch:triggered", onDispatchTriggered);
+    
     return () => {
       socket.off("queue:update", onQueueUpdate);
+      socket.off("bus:state-change", onStateChange);
+      socket.off("dispatch:triggered", onDispatchTriggered);
     };
   }, [token, socket]);
 

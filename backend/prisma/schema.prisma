@@ -45,6 +45,8 @@ model Shift {
   state    String    @default("Idle") // Idle | En_Route_YS2 | Waiting_YS2 | En_Route_YS1 | Waiting_YS1 | Returning_College
   startedAt DateTime @default(now())
   endedAt   DateTime?
+  updatedAt DateTime @updatedAt
+  stateChangedAt DateTime? // Timestamp of last state transition (for timer recovery)
 
   // Latest GPS position (updated in real-time)
   latitude  Float?

@@ -189,6 +189,77 @@ function stopTimeoutChecker() {
   }
 }
 
+/**
+ * Recover active countdown timers after a server restart.
+ *
+ * Queries all active shifts in `Waiting_YS2` or `Waiting_YS1` state and
+ * restarts their countdown timers based on how much time has elapsed since
+ * `stateChangedAt`. This prevents "zombie shifts" that are stuck in a
+ * waiting state with no running timer.
+ *
+ * @param {import("socket.io").Server} io - Socket.IO server instance.
+ * @returns {Promise<void>}
+ */
+async function recoverActiveTimers(io) {
+  try {
+    const waitingShifts = await prisma.shift.findMany({
+      where: {
+        endedAt: { isSet: false },
+        state: { in: ["Waiting_YS2", "Waiting_YS1"] },
+      },
+    });
+
+    if (waitingShifts.length === 0) {
+      console.log("[timerManager] No active waiting shifts to recover.");
+      return;
+    }
+
+    for (const shift of waitingShifts) {
+      const changedAt = shift.stateChangedAt || shift.updatedAt || shift.startedAt;
+      const elapsed = Date.now() - new Date(changedAt).getTime();
+      const remainingMs = Math.max(0, DEFAULT_COUNTDOWN_MS - elapsed);
+      const stopName = shift.state === "Waiting_YS2" ? "YS2" : "YS1";
+
+      if (remainingMs > 0) {
+        console.log(
+          `[timerManager] Recovering timer for shift ${shift.id} at ${stopName}: ` +
+            `${Math.round(remainingMs / 1000)}s remaining.`
+        );
+        startCountdown(shift.id, stopName, remainingMs, io, async () => {
+          console.log(
+            `[timerManager] Recovered timer expired for shift ${shift.id} at ${stopName}. Auto-transitioning.`
+          );
+          try {
+            const nextState = stopName === "YS2" ? "En_Route_YS1" : "Returning_College";
+            const stateMachine = require("./stateMachine");
+            try {
+              const { updateShiftState } = require("../socket");
+              updateShiftState(shift.id, nextState);
+            } catch (socketErr) {
+              // Socket might not be available or initialized yet
+            }
+            await stateMachine.transition(shift.id, nextState, io);
+          } catch (err) {
+            console.error(
+              `[timerManager] Failed to transition shift ${shift.id} after recovered timer expired:`,
+              err
+            );
+          }
+        });
+      } else {
+        console.log(
+          `[timerManager] Timer for shift ${shift.id} at ${stopName} already expired ` +
+            `(${Math.round(elapsed / 1000)}s ago). No recovery needed.`
+        );
+      }
+    }
+
+    console.log(`[timerManager] Recovered ${waitingShifts.length} timer(s).`);
+  } catch (err) {
+    console.error("[timerManager] recoverActiveTimers error:", err);
+  }
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────
 module.exports = {
   DEFAULT_COUNTDOWN_MS,
@@ -197,4 +268,5 @@ module.exports = {
   getRemaining,
   startTimeoutChecker,
   stopTimeoutChecker,
+  recoverActiveTimers,
 };

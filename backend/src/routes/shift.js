@@ -10,7 +10,7 @@ const router = express.Router();
 router.get("/active-fleet", authenticate, async (req, res) => {
   try {
     const shifts = await prisma.shift.findMany({
-      where: { endedAt: null },
+      where: { endedAt: { isSet: false } },
       include: {
         bus: true,
         driver: {
@@ -56,7 +56,7 @@ router.get("/active-fleet", authenticate, async (req, res) => {
 router.get("/active", authenticate, requireRole("driver"), async (req, res) => {
   try {
     const shift = await prisma.shift.findFirst({
-      where: { driverId: req.userId, endedAt: null },
+      where: { driverId: req.userId, endedAt: { isSet: false } },
       include: { bus: true },
     });
 
@@ -90,7 +90,7 @@ router.post("/start", authenticate, requireRole("driver"), async (req, res) => {
 
     // 2. Verify driver doesn't have an active shift already
     const existingDriverShift = await prisma.shift.findFirst({
-      where: { driverId: req.userId, endedAt: null },
+      where: { driverId: req.userId, endedAt: { isSet: false } },
     });
     if (existingDriverShift) {
       return res.status(400).json({ error: "You already have an active shift" });
@@ -98,7 +98,7 @@ router.post("/start", authenticate, requireRole("driver"), async (req, res) => {
 
     // 3. Verify bus isn't in use by another active shift
     const existingBusShift = await prisma.shift.findFirst({
-      where: { busId, endedAt: null },
+      where: { busId, endedAt: { isSet: false } },
     });
     if (existingBusShift) {
       return res.status(400).json({ error: "This bus is already in use by another driver" });
@@ -125,7 +125,7 @@ router.post("/start", authenticate, requireRole("driver"), async (req, res) => {
 router.post("/end", authenticate, requireRole("driver"), async (req, res) => {
   try {
     const shift = await prisma.shift.findFirst({
-      where: { driverId: req.userId, endedAt: null },
+      where: { driverId: req.userId, endedAt: { isSet: false } },
     });
 
     if (!shift) {
@@ -164,7 +164,7 @@ router.post("/transition", authenticate, requireRole("driver"), async (req, res)
 
   try {
     const shift = await prisma.shift.findFirst({
-      where: { driverId: req.userId, endedAt: null },
+      where: { driverId: req.userId, endedAt: { isSet: false } },
     });
 
     if (!shift) {

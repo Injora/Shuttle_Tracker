@@ -6,6 +6,7 @@
 
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
+const prisma = require("./lib/prisma");
 const stateMachine = require("./services/stateMachine");
 const geofence = require("./services/geofence");
 const timerManager = require("./services/timerManager");
@@ -18,7 +19,7 @@ let io = null;
 /**
  * In-memory store for active driver locations.
  * Keyed by shiftId for identity-based tracking (not socket ID).
- * { shiftId: { latitude, longitude, heading, speed, busNumber, state, lastUpdate } }
+ * { shiftId: { latitude, longitude, heading, speed, busNumber, state, lastUpdate, dirty, disconnected } }
  */
 const driverLocations = new Map();
 
@@ -95,6 +96,23 @@ async function triggerManualTransition(shiftId, toState) {
     await stateMachine.transition(shiftId, toState, io);
     updateShiftState(shiftId, toState);
   }
+}
+
+// ── Connection health enrichment ──────────────────────────────────────────
+/**
+ * Enrich a location entry with connection health metadata.
+ * Used so the client can display stale/lost indicators and interpolate.
+ *
+ * @param {Object} loc - Location data from driverLocations Map.
+ * @returns {Object} Enriched location data with connectionHealth and lastSeenAgo.
+ */
+function enrichLocationData(loc) {
+  const staleSec = (Date.now() - loc.lastUpdate) / 1000;
+  return {
+    ...loc,
+    connectionHealth: staleSec < 10 ? "live" : staleSec < 30 ? "stale" : "lost",
+    lastSeenAgo: Math.round(staleSec),
+  };
 }
 
 /**
@@ -179,7 +197,16 @@ function setupSocket(server) {
 
       // Fetch or default current state
       const currentLoc = driverLocations.get(shiftId);
-      const currentState = currentLoc?.state || "Idle";
+      let currentState = currentLoc?.state;
+      if (!currentState) {
+        try {
+          const dbShift = await prisma.shift.findUnique({ where: { id: shiftId } });
+          currentState = dbShift?.state || "Idle";
+        } catch (dbErr) {
+          console.error(`[Socket] Failed to fetch shift state from DB for recovery:`, dbErr.message);
+          currentState = "Idle";
+        }
+      }
 
       // Update in-memory location store
       const locationData = {
@@ -192,12 +219,14 @@ function setupSocket(server) {
         state: currentState,
         lastUpdate: Date.now(),
         driverEmail: socket.userEmail,
+        dirty: true, // Mark for batched DB persistence
+        disconnected: false,
       };
 
       driverLocations.set(shiftId, locationData);
 
-      // Broadcast to all students
-      io.to("role:student").emit("bus:location", locationData);
+      // Broadcast to all students (with connection health enrichment)
+      io.to("role:student").emit("bus:location", enrichLocationData(locationData));
 
       // ── Geofence Engine / Auto-Transitions ──────────────────
       try {
@@ -252,8 +281,10 @@ function setupSocket(server) {
      * They're already in role:student room, so they get all bus:location events.
      */
     socket.on("student:subscribe-tracking", () => {
-      // Send current snapshot of all active bus locations
-      const activeLocations = Array.from(driverLocations.values());
+      // Send current snapshot of all active bus locations (with health enrichment)
+      const activeLocations = Array.from(driverLocations.values())
+        .filter((loc) => !loc.disconnected || Date.now() - loc.lastUpdate < 60000)
+        .map(enrichLocationData);
       socket.emit("bus:all-locations", activeLocations);
     });
 
@@ -286,9 +317,9 @@ function setupSocket(server) {
   // Broadcast full location snapshot every 5 seconds as a fallback
   // (individual updates are sent on each driver:location-update)
   setInterval(() => {
-    const activeLocations = Array.from(driverLocations.values()).filter(
-      (loc) => !loc.disconnected || Date.now() - loc.lastUpdate < 30000,
-    );
+    const activeLocations = Array.from(driverLocations.values())
+      .filter((loc) => !loc.disconnected || Date.now() - loc.lastUpdate < 30000)
+      .map(enrichLocationData);
 
     // Clean up stale disconnected entries (>60 seconds)
     for (const [shiftId, loc] of driverLocations.entries()) {
@@ -303,6 +334,32 @@ function setupSocket(server) {
       io.to("role:student").emit("bus:all-locations", activeLocations);
     }
   }, 5000);
+
+  // ── Batched GPS Persistence ─────────────────────────────
+  // Write dirty GPS coordinates to MongoDB every 15 seconds.
+  // This avoids hammering the DB on every 3-second location update
+  // while ensuring positions survive server restarts.
+  setInterval(async () => {
+    for (const [shiftId, loc] of driverLocations.entries()) {
+      if (loc.dirty && !loc.disconnected) {
+        try {
+          await prisma.shift.update({
+            where: { id: shiftId },
+            data: {
+              latitude: loc.latitude,
+              longitude: loc.longitude,
+              heading: loc.heading,
+              speed: loc.speed,
+              lastGpsAt: new Date(loc.lastUpdate),
+            },
+          });
+          loc.dirty = false;
+        } catch (err) {
+          console.error(`[GPS Persist] Failed for shift ${shiftId}:`, err.message);
+        }
+      }
+    }
+  }, 15_000);
 
   return io;
 }

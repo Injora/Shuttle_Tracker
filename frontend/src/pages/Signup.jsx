@@ -11,7 +11,6 @@ import {
   Phone,
   CreditCard
 } from "lucide-react";
-import { GoogleLogin } from "@react-oauth/google";
 import { useAuth } from "../contexts/AuthContext";
 import toast, { Toaster } from "react-hot-toast";
 
@@ -73,35 +72,6 @@ export default function Signup() {
     }
   };
 
-  const handleGoogleSuccess = async (credentialResponse) => {
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/auth/google`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            credential: credentialResponse.credential,
-            role,
-          }),
-        },
-      );
-      const data = await response.json();
-      if (response.ok) {
-        toast.success("Account created via Google!");
-        login(data.token, data.user);
-        if (data.user.role === "driver") {
-          navigate("/driver");
-        } else {
-          navigate("/");
-        }
-      } else {
-        toast.error(data.error || "Google registration failed");
-      }
-    } catch (err) {
-      toast.error("Network error with Google registration");
-    }
-  };
 
   return (
     <div className="min-h-[calc(100vh-140px)] w-full flex items-center justify-center p-4 relative overflow-hidden">
@@ -250,31 +220,6 @@ export default function Signup() {
             </button>
           </form>
 
-          <div className="mt-6">
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">
-                  Or register with Google
-                </span>
-              </div>
-            </div>
-
-            <div className="flex justify-center">
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={() => toast.error("Google Signup Failed")}
-                useOneTap
-                theme="filled_blue"
-                shape="pill"
-                size="large"
-                text="signup_with"
-                width="100%"
-              />
-            </div>
-          </div>
 
           <p className="text-center mt-6 text-sm text-muted-foreground">
             Already have an account?{" "}

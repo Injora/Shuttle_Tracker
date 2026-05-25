@@ -9,8 +9,8 @@ const authRouter = require("./routes/auth");
 const shiftRouter = require("./routes/shift");
 const dispatchRouter = require("./routes/dispatch");
 
-const { setupSocket } = require("./socket");
-const { startTimeoutChecker } = require("./services/timerManager");
+const { setupSocket, updateShiftState } = require("./socket");
+const { startTimeoutChecker, recoverActiveTimers } = require("./services/timerManager");
 const { triggerDispatch } = require("./services/dispatchManager");
 
 const app = express();
@@ -67,8 +67,18 @@ app.get("/api/health", (req, res) => {
 const server = http.createServer(app);
 const io = setupSocket(server);
 
+// Helper: pass to dispatchManager so it can sync in-memory state without circular imports
+const onDispatchStateSync = (shiftId, newState) => {
+  updateShiftState(shiftId, newState);
+};
+
 // Start off-hours automatic queue timeout checking (polls every 60s)
-startTimeoutChecker(io, () => triggerDispatch("timeout_20min", io));
+startTimeoutChecker(io, () => triggerDispatch("timeout_20min", io, onDispatchStateSync));
+
+// Recover any active countdown timers that may have been lost during a server restart
+recoverActiveTimers(io).catch((err) => {
+  console.error("[Startup] Timer recovery failed:", err.message);
+});
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

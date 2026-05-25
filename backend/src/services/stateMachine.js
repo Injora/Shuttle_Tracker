@@ -98,7 +98,10 @@ async function transition(shiftId, toState, io) {
   // 3. Persist
   const updatedShift = await prisma.shift.update({
     where: { id: shiftId },
-    data: { state: toState },
+    data: {
+      state: toState,
+      stateChangedAt: new Date(),
+    },
   });
 
   // 4. Broadcast
